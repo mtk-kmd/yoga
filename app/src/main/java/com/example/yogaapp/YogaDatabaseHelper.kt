@@ -210,32 +210,47 @@ class YogaDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         db.close()
     }
 
-    fun searchClassesByDay(day: String): List<YogaClass> {
+    suspend fun searchClassesByDay(day: String): List<YogaClass> {
         val yogaClasses = mutableListOf<YogaClass>()
-        val db = this.readableDatabase
-        val cursor = db.rawQuery(
-            "SELECT * FROM $TABLE_CLASSES WHERE $COLUMN_DAY = ?",
-            arrayOf(day)
-        )
+        val url = URL("https://yoga.mtktechlab.com/classes?day=$day")
 
-        if (cursor.moveToFirst()) {
-            do {
-                val yogaClass = YogaClass(
-                    cursor.getInt(cursor.getColumnIndexOrThrow(COLUMN_ID)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_DAY)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TIME)),
-                    cursor.getInt(cursor.getColumnIndexOrThrow(COLUMN_CAPACITY)),
-                    cursor.getInt(cursor.getColumnIndexOrThrow(COLUMN_DURATION)),
-                    cursor.getDouble(cursor.getColumnIndexOrThrow(COLUMN_PRICE)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TYPE)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_DESCRIPTION)),
-                    cursor.getString(cursor.getColumnIndexOrThrow(COLUMN_TEACHER))
-                )
-                yogaClasses.add(yogaClass)
-            } while (cursor.moveToNext())
+        withContext(Dispatchers.IO) {
+            val urlConnection = url.openConnection() as HttpURLConnection
+            try {
+                urlConnection.requestMethod = "GET"
+                urlConnection.setRequestProperty("Content-Type", "application/json")
+                val responseCode = urlConnection.responseCode
+
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    val inputStream = urlConnection.inputStream
+                    val response = inputStream.bufferedReader().use { it.readText() }
+
+                    // Parse JSON response
+                    val jsonArray = JSONArray(response)
+                    for (i in 0 until jsonArray.length()) {
+                        val jsonObject = jsonArray.getJSONObject(i)
+                        val yogaClass = YogaClass(
+                            jsonObject.getInt("id"),
+                            jsonObject.getString("day"),
+                            jsonObject.getString("time"),
+                            jsonObject.getInt("capacity"),
+                            jsonObject.getInt("duration"),
+                            jsonObject.getDouble("price"),
+                            jsonObject.getString("type"),
+                            jsonObject.optString("description", ""),
+                            jsonObject.optString("teacher", "")
+                        )
+                        yogaClasses.add(yogaClass)
+                    }
+                } else {
+                    Log.e("API Error", "Failed to fetch classeds. Response code: $responseCode")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                urlConnection.disconnect()
+            }
         }
-        cursor.close()
-        db.close()
         return yogaClasses
     }
 }

@@ -39,18 +39,24 @@ class MainActivity : AppCompatActivity() {
         searchButton.setOnClickListener {
             val dayTerm = daySearch.text.toString().trim()
 
-            val searchResults = when {
-                dayTerm.isNotEmpty() -> dbHelper.searchClassesByDay(dayTerm)
-                else -> {
-                    Toast.makeText(this, "Please enter a search term", Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
+            if (dayTerm.isEmpty()) {
+                Toast.makeText(this, "Please enter a search term", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
 
-            if (searchResults.isEmpty()) {
-                Toast.makeText(this, "No results found", Toast.LENGTH_SHORT).show()
-            } else {
-                displaySearchResults(searchResults)
+            lifecycleScope.launch {
+                try {
+                    val searchResults = dbHelper.searchClassesByDay(dayTerm) // Call the API-based function
+
+                    if (searchResults.isEmpty()) {
+                        Toast.makeText(this@MainActivity, "No results found", Toast.LENGTH_SHORT).show()
+                    } else {
+                        displaySearchResults(searchResults) // Update UI with results
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                    Toast.makeText(this@MainActivity, "Error fetching results", Toast.LENGTH_SHORT).show()
+                }
             }
         }
 
