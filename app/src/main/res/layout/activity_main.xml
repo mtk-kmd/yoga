@@ -9,11 +9,16 @@
         android:orientation="vertical"
         android:padding="16dp">
 
-        <EditText
-            android:id="@+id/searchInput"
+        <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:hint="Search by teacher" />
+            android:text="Advanced Search" />
+
+        <EditText
+            android:id="@+id/daySearchInput"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Search by Day (e.g., Monday)" />
 
         <Button
             android:id="@+id/searchButton"

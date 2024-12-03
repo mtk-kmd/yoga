@@ -8,6 +8,8 @@ import android.widget.EditText
 import android.widget.ListView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
     private lateinit var dbHelper: YogaDatabaseHelper
@@ -19,6 +21,7 @@ class MainActivity : AppCompatActivity() {
     private var classInstanceList = mutableListOf<ClassInstance>()
     private lateinit var searchInput: EditText
     private lateinit var searchButton: Button
+    private lateinit var daySearch: EditText
     private lateinit var searchResultsListView: ListView
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,14 +32,24 @@ class MainActivity : AppCompatActivity() {
         classListView = findViewById(R.id.classListView)
         instanceListView = findViewById(R.id.instanceListView)
 
-        searchInput = findViewById(R.id.searchInput)
+        daySearch = findViewById(R.id.daySearchInput)
         searchButton = findViewById(R.id.searchButton)
         searchResultsListView = findViewById(R.id.searchResultsListView)
 
         searchButton.setOnClickListener {
-            val searchTerm = searchInput.text.toString().trim()
-            if (searchTerm.isNotEmpty()) {
-                val searchResults = dbHelper.searchClassesByTeacher(searchTerm)
+            val dayTerm = daySearch.text.toString().trim()
+
+            val searchResults = when {
+                dayTerm.isNotEmpty() -> dbHelper.searchClassesByDay(dayTerm)
+                else -> {
+                    Toast.makeText(this, "Please enter a search term", Toast.LENGTH_SHORT).show()
+                    return@setOnClickListener
+                }
+            }
+
+            if (searchResults.isEmpty()) {
+                Toast.makeText(this, "No results found", Toast.LENGTH_SHORT).show()
+            } else {
                 displaySearchResults(searchResults)
             }
         }
@@ -54,7 +67,9 @@ class MainActivity : AppCompatActivity() {
         val commentsInput: EditText = findViewById(R.id.commentsInput)
         val instructorInput: EditText = findViewById(R.id.instructorInput)
 
-        loadYogaClasses()
+        lifecycleScope.launch {
+            loadYogaClasses()
+        }
 
         // Button to add a new yoga class
         val addButton: Button = findViewById(R.id.addButton)
@@ -68,18 +83,21 @@ class MainActivity : AppCompatActivity() {
             val type = typeInput.text.toString()
             val description = descriptionInput.text.toString()
             val teacher = teacherInput.text.toString()
-            val instructor = instructorInput.text.toString()
 
             // Add the yoga class to the database
             dbHelper.addYogaClass(day, time, capacity, duration, price, type, description, teacher)
-            loadYogaClasses()
+            lifecycleScope.launch {
+                loadYogaClasses()
+            }
         }
 
         // Button to reset the database
         val resetButton: Button = findViewById(R.id.resetButton)
         resetButton.setOnClickListener {
             dbHelper.resetDatabase()
-            loadYogaClasses()
+            lifecycleScope.launch {
+                loadYogaClasses()
+            }
         }
 
         classListView.setOnItemClickListener { _, _, position, _ ->
@@ -142,7 +160,6 @@ class MainActivity : AppCompatActivity() {
                 .setMessage(details)
                 .setPositiveButton("Confirm") { _, _ ->
                     Toast.makeText(this, "Details confirmed!", Toast.LENGTH_SHORT).show()
-                    // Here you can handle the saving logic
                 }
                 .setNegativeButton("Edit") { dialog, _ -> dialog.dismiss() }
                 .create()
@@ -150,7 +167,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadYogaClasses() {
+    private suspend fun loadYogaClasses() {
         yogaClassList = dbHelper.getAllYogaClasses().toMutableList()
         val classNames = yogaClassList.map { "${it.day} - ${it.time} - ${it.type}" }
         classAdapter = ArrayAdapter(this, android.R.layout.simple_list_item_1, classNames)
@@ -168,7 +185,7 @@ class MainActivity : AppCompatActivity() {
         val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_list_item_1,
-            searchResults.map { "${it.type} with ${it.teacher}" }
+            searchResults.map { "${it.type} on ${it.day} at ${it.time}" }
         )
         searchResultsListView.adapter = adapter
 

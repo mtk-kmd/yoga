@@ -4,6 +4,16 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import java.net.HttpURLConnection
+import java.net.URL
+import java.io.OutputStream
+import org.json.JSONObject
 
 class YogaDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_NAME, null, DATABASE_VERSION) {
 
@@ -60,19 +70,48 @@ class YogaDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
     }
 
     fun addYogaClass(day: String, time: String, capacity: Int, duration: Int, price: Double, type: String, description: String?, teacher: String) {
-        val db = this.writableDatabase
-        val values = ContentValues()
-        values.put(COLUMN_DAY, day)
-        values.put(COLUMN_TIME, time)
-        values.put(COLUMN_CAPACITY, capacity)
-        values.put(COLUMN_DURATION, duration)
-        values.put(COLUMN_PRICE, price)
-        values.put(COLUMN_TYPE, type)
-        values.put(COLUMN_DESCRIPTION, description)
-        values.put(COLUMN_TEACHER, teacher)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val url = URL("https://yoga.mtktechlab.com/classes")
+                val urlConnection = url.openConnection() as HttpURLConnection
 
-        db.insert(TABLE_NAME, null, values)
-        db.close()
+                urlConnection.requestMethod = "POST"
+                urlConnection.setRequestProperty("Content-Type", "application/json")
+                urlConnection.doOutput = true
+
+                val descriptionValue = description ?: ""
+                val teacherValue = teacher ?: ""
+
+                val jsonObject = JSONObject().apply {
+                    put("day", day)
+                    put("time", time)
+                    put("capacity", capacity)
+                    put("duration", duration)
+                    put("price", price)
+                    put("type", type)
+                    put("description", descriptionValue)
+                    put("teacher", teacherValue)
+                }
+
+                withContext(Dispatchers.IO) {
+                    urlConnection.outputStream.use { outputStream: OutputStream ->
+                        outputStream.write(jsonObject.toString().toByteArray())
+                        outputStream.flush()
+                    }
+                }
+
+                val responseCode = urlConnection.responseCode
+                withContext(Dispatchers.Main) {
+                    if (responseCode == HttpURLConnection.HTTP_CREATED) {
+                        println("Class added successfully")
+                    } else {
+                        println("Failed to add class. Response code: $responseCode")
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
     }
 
     fun addClassInstance(date: String, teacher: String, comments: String?, classId: Int) {
@@ -115,10 +154,69 @@ class YogaDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         db.close()
     }
 
-    fun getAllYogaClasses(): List<YogaClass> {
+     suspend fun getAllYogaClasses(): List<YogaClass> {
+        val yogaClasses = mutableListOf<YogaClass>()
+        val url = URL("https://yoga.mtktechlab.com/classes")
+
+        withContext(Dispatchers.IO) {
+            val urlConnection = url.openConnection() as HttpURLConnection
+            try {
+                urlConnection.requestMethod = "GET"
+                urlConnection.setRequestProperty("Content-Type", "application/json")
+                val responseCode = urlConnection.responseCode
+
+                if (responseCode == HttpURLConnection.HTTP_OK) {
+                    val inputStream = urlConnection.inputStream
+                    val response = inputStream.bufferedReader().use { it.readText() }
+
+                    // Parse JSON response
+                    val jsonArray = JSONArray(response)
+                    for (i in 0 until jsonArray.length()) {
+                        val jsonObject = jsonArray.getJSONObject(i)
+                        val yogaClass = YogaClass(
+                            jsonObject.getInt("id"),
+                            jsonObject.getString("day"),
+                            jsonObject.getString("time"),
+                            jsonObject.getInt("capacity"),
+                            jsonObject.getInt("duration"),
+                            jsonObject.getDouble("price"),
+                            jsonObject.getString("type"),
+                            jsonObject.optString("description", ""),
+                            jsonObject.optString("teacher", "")
+                        )
+                        yogaClasses.add(yogaClass)
+                    }
+                } else {
+                    Log.e("API Error", "Failed to fetch classes. Response code: $responseCode")
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                urlConnection.disconnect()
+            }
+        }
+        return yogaClasses
+    }
+
+    fun deleteYogaClass(id: Int) {
+        val db = this.writableDatabase
+        db.delete(TABLE_NAME, "$COLUMN_ID=?", arrayOf(id.toString()))
+        db.close()
+    }
+
+    fun resetDatabase() {
+        val db = this.writableDatabase
+        db.execSQL("DELETE FROM $TABLE_NAME")
+        db.close()
+    }
+
+    fun searchClassesByDay(day: String): List<YogaClass> {
         val yogaClasses = mutableListOf<YogaClass>()
         val db = this.readableDatabase
-        val cursor = db.rawQuery("SELECT * FROM $TABLE_NAME", null)
+        val cursor = db.rawQuery(
+            "SELECT * FROM $TABLE_CLASSES WHERE $COLUMN_DAY = ?",
+            arrayOf(day)
+        )
 
         if (cursor.moveToFirst()) {
             do {
@@ -139,74 +237,5 @@ class YogaDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE_
         cursor.close()
         db.close()
         return yogaClasses
-    }
-
-    fun deleteYogaClass(id: Int) {
-        val db = this.writableDatabase
-        db.delete(TABLE_NAME, "$COLUMN_ID=?", arrayOf(id.toString()))
-        db.close()
-    }
-
-    fun resetDatabase() {
-        val db = this.writableDatabase
-        db.execSQL("DELETE FROM $TABLE_NAME")
-        db.close()
-    }
-
-    fun searchClassesByTeacher(teacher: String): List<YogaClass> {
-        val results = mutableListOf<YogaClass>()
-        val db = this.readableDatabase
-        val searchTerm = "%${teacher.trim()}%"
-
-        val cursor = db.rawQuery(
-            "SELECT id, day, time, capacity, duration, price, type, description, teacher FROM $TABLE_CLASSES WHERE teacher LIKE ?",
-            arrayOf(searchTerm)
-        )
-
-        if (cursor.moveToFirst()) {
-            do {
-                val id = cursor.getInt(cursor.getColumnIndexOrThrow("id"))
-                val day = cursor.getString(cursor.getColumnIndexOrThrow("day"))
-                val time = cursor.getString(cursor.getColumnIndexOrThrow("time"))
-                val capacity = cursor.getInt(cursor.getColumnIndexOrThrow("capacity"))
-                val duration = cursor.getInt(cursor.getColumnIndexOrThrow("duration"))
-                val price = cursor.getDouble(cursor.getColumnIndexOrThrow("price"))
-                val type = cursor.getString(cursor.getColumnIndexOrThrow("type"))
-                val description = cursor.getString(cursor.getColumnIndexOrThrow("description"))
-                val teacherName = cursor.getString(cursor.getColumnIndexOrThrow("teacher"))
-
-                results.add(YogaClass(id, day, time, capacity, duration, price, type, description, teacherName))
-            } while (cursor.moveToNext())
-        }
-
-        cursor.close()
-        return results
-    }
-
-    fun searchClassesByDayOrDate(query: String): List<YogaClass> {
-        val db = this.readableDatabase
-        val classList = mutableListOf<YogaClass>()
-        val cursor = db.rawQuery(
-            "SELECT * FROM $TABLE_CLASSES WHERE day = ? OR date = ?",
-            arrayOf(query, query)
-        )
-        if (cursor.moveToFirst()) {
-            do {
-                val yogaClass = YogaClass(
-                    id = cursor.getInt(cursor.getColumnIndex("id")),
-                    day = cursor.getString(cursor.getColumnIndex("day")),
-                    time = cursor.getString(cursor.getColumnIndex("time")),
-                    capacity = cursor.getInt(cursor.getColumnIndex("capacity")),
-                    duration = cursor.getInt(cursor.getColumnIndex("duration")),
-                    price = cursor.getDouble(cursor.getColumnIndex("price")),
-                    type = cursor.getString(cursor.getColumnIndex("type")),
-                    description = cursor.getString(cursor.getColumnIndex("description")),
-                    teacher = cursor.getString(cursor.getColumnIndex("teacher"))
-                )
-                classList.add(yogaClass)
-            } while (cursor.moveToNext())
-        }
-        cursor.close()
-        return classList
     }
 }
